@@ -1,0 +1,444 @@
+---
+title: "Breast Cancer Prediction"
+author: "Wedad"
+date: "2023-11-02"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+```
+
+
+
+## Loading the Libraries
+
+
+```{r, message=FALSE}
+
+library(mlbench)
+library(caTools)
+library(rpart)
+library(rpart.plot)
+library(plotly)
+library(e1071)
+library(ggplot2)
+library(caret)
+library(pROC)
+library(PRROC)
+library(xgboost)
+
+```
+
+
+## Loading the Dataset
+
+
+```{r}
+
+# loading the dataset
+data("BreastCancer")
+
+# checking the structure of the dataset
+str(BreastCancer)
+
+# View the entire dataset 
+View(BreastCancer)
+
+```
+
+
+
+The data has 699 obs. of 11 variables, The objective is to identify each of a number of benign or malignant classes. Samples arrive periodically as Dr. Wolberg reports his clinical cases. The database therefore reflects this chronological grouping of the data. This grouping information appears immediately below, having been removed from the data itself. Each variable except for the first was converted into 11 primitive numerical attributes with values ranging from 0 through 10. There are 16 missing attribute values. A data frame with 699 observations on 11 variables, one being a character variable, 9 being ordered or nominal, and 1 target class.
+
+[,1] Id Sample code number #[,2] Cl.thickness Clump Thickness #[,3] Cell.size Uniformity of Cell Size #[,4] Cell.shape Uniformity of Cell Shape #[,5] Marg.adhesion Marginal Adhesion #[,6] Epith.c.size Single Epithelial Cell Size #[,7] Bare.nuclei Bare Nuclei #[,8] Bl.cromatin Bland Chromatin #[,9] Normal.nucleoli Normal Nucleoli #[,10] Mitoses Mitoses #[,11] Class Class
+
+
+```{r}
+
+#remove the first column, 
+BreastCancer<-BreastCancer[,-1]
+
+# show the summary of the dataset
+summary(BreastCancer)
+
+```
+
+
+## Preprocessing the Dataset
+
+
+### Checking the Null Values
+
+Sometimes R does not recognize empty strings and question marks as null values, so we first replace then with nulls if any then remove all the nulls.
+
+
+```{r}
+
+# Replace empty strings with NA
+BreastCancer[BreastCancer == ""] <- NA
+
+# Replace ? with NA
+BreastCancer[BreastCancer == "?"] <- NA
+
+# Check for null values in the BreastCancer dataset
+null_values <- sum(is.null(BreastCancer$Bare.nuclei))
+
+print(paste("Number of null values in the BreastCancer dataset:", null_values))
+
+# remove nulls
+BreastCancer <- na.omit(BreastCancer)
+
+```
+
+Seems we have no null values. Having confirmed that, we can now proceed with the analysis
+
+
+### Encoding the Class Variable
+
+
+The next step is to encode the class variable to 0, and 1.
+
+
+```{r}
+
+# # Encode Class variable as 0 and 1
+# BreastCancer$Class <- ifelse(BreastCancer$Class == "benign", 0, 1)
+# 
+# # Verify the changes
+# unique(BreastCancer$Class)
+
+```
+
+
+
+
+```{r}
+
+# Count the frequency of each class
+class_counts <- table(BreastCancer$Class)
+
+# Create a 3D pie chart using plotly
+plot_ly(labels = c("Benign", "Malignant"), 
+        values = class_counts, 
+        type = "pie", 
+        marker = list(colors = c("darkblue", "green")),
+        textinfo = "label+percent",
+        textposition = "inside",
+        hole = 0.3) %>%
+  layout(title = "Distribution of Classes in Breast Cancer Dataset",
+         scene = list(camera = list(eye = list(x = 1.25, y = 1.25, z = 1.25))))
+
+```
+
+
+
+### Distributions of Numeric Variables
+
+
+```{r, message=FALSE}
+
+# Select factor variables (excluding the 'Class' variable)
+factor_variables <- BreastCancer[, sapply(BreastCancer, is.factor) & names(BreastCancer) != "Class"]
+
+# Create bar plots for each factor variable
+plots <- lapply(names(factor_variables), function(var) {
+  ggplot(data = BreastCancer, aes(x = factor_variables[[var]], fill = as.factor(Class))) +
+    geom_bar(position = "dodge") +
+    labs(x = var, y = "Count", fill = "Class") +
+    ggtitle(paste("Distribution of", var, "by Class")) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+})
+
+plots
+
+```
+
+
+# Splitting the Dataset
+
+
+```{r}
+
+# Set the split ratio
+set.seed(2023)  # For reproducibility
+ind <- sample.split(BreastCancer$Class, SplitRatio = 0.7)
+
+# Subsetting into Train data
+train <- BreastCancer[ind,]
+cat('The shape of the training dataset:', dim(train))
+
+# Subsetting into Test data
+test <- BreastCancer[!ind,]
+cat('\nThe shape of the test dataset:', dim(test))
+
+```
+
+
+
+## Decision Tree Classifier
+
+
+
+```{r}
+
+# set seed for reproducibility
+set.seed(2023)
+
+# Train a decision tree classifier
+tree_model = rpart(Class ~ ., data=train, method="class", minsplit = 10)
+
+# Print the summary of the tree
+print(summary(tree_model))
+
+```
+
+
+
+### Plotting the Tree
+
+
+```{r}
+
+##plot the tree
+rpart.plot(tree_model, box.palette="RdBu", shadow.col="gray", nn=TRUE, yesno = 2)
+
+```
+
+
+### Evaluating Decision Tree Classifier
+
+
+```{r}
+
+# Make predictions on the test data
+tree_predictions <- predict(tree_model, test, type = "class")
+
+# Evaluate the model
+confusion_matrix <- confusionMatrix(tree_predictions, test$Class)
+
+# Output the results
+table(tree_predictions, test$Class)
+prop.table(table(tree_predictions, test$Class),1)
+cat('\n')
+cat('\n')
+
+
+# Confusion Matrix
+cf <- caret::confusionMatrix(data=tree_predictions,
+                     reference=test$Class)
+print(cf)
+
+```
+
+
+The Decision Tree model was evaluated using a confusion matrix. The confusion matrix shows the number of true positives, true negatives, false positives, and false negatives. The model predicted 129 cases as benign and they were actually benign, while 4 cases were predicted as benign but were actually malignant. On the other hand, the model predicted 68 cases as malignant and they were actually malignant, while 4 cases were predicted as malignant but were actually benign.
+
+The accuracy of the model is 0.961, which means that it correctly classified 96.1% of the cases. The sensitivity (also known as true positive rate) is 0.9699, indicating that the model correctly identified 96.99% of the malignant cases. The specificity (also known as true negative rate) is 0.9444, indicating that the model correctly identified 94.44% of the benign cases. The positive predictive value (also known as precision) is 0.9699, indicating that when the model predicted a case as malignant, it was correct 96.99% of the time. The negative predictive value is 0.9444, indicating that when the model predicted a case as benign, it was correct 94.44% of the time.
+
+
+
+## Support Vector Machine 
+
+
+### Checking for Best Parameters
+
+
+```{r}
+
+# set seed for reproducibility
+set.seed(2023)
+
+# create svm model
+svm_model <- tune.svm(Class~ Cl.thickness + 
+                        Cell.size + 
+                        Cell.shape + 
+                        Marg.adhesion + 
+                        Epith.c.size + 
+                        Bare.nuclei + 
+                        Bl.cromatin + 
+                        Normal.nucleoli + 
+                        Mitoses, 
+                      data = train, gamma = 10^(-6:-1), cost = 10^(-1:1))
+
+summary(svm_model)
+
+```
+
+### Support Vector Machine with Best Parameters
+
+
+```{r}
+
+# set seed for reproducibility
+set.seed(2023)
+
+# Create an SVM model
+svm_model2 <- svm(Class~ Cl.thickness + 
+                        Cell.size + 
+                        Cell.shape + 
+                        Marg.adhesion + 
+                        Epith.c.size + 
+                        Bare.nuclei + 
+                        Bl.cromatin + 
+                        Normal.nucleoli + 
+                        Mitoses, 
+                      data = train, type = 'C-classification', gamma = 0.1, cost = 0.1)
+
+summary(svm_model2)
+
+```
+
+
+
+### Predictions Using SVM With Best Parameters
+
+
+```{r}
+
+# Remove the 'Class' column (labels) from the test dataset
+test_features <- test[, -which(names(test) == "Class")]
+
+# Make predictions using the SVM model and the test features
+svm_predictions <- predict(svm_model2, newdata = test_features)
+
+# Output the results
+table(svm_predictions, test$Class)
+prop.table(table(svm_predictions, test$Class),1)
+cat('\n')
+cat('\n')
+
+
+# Confusion Matrix
+cf <- caret::confusionMatrix(data=svm_predictions,
+                     reference=test$Class)
+print(cf)
+
+```
+
+
+
+The SVM (Support Vector Machine) model was evaluated using a confusion matrix. The model predicted 125 cases as benign and they were actually benign, while 2 cases were predicted as benign but were actually malignant. On the other hand, the model predicted 70 cases as malignant and they were actually malignant, while 8 cases were predicted as malignant but were actually benign.
+
+The accuracy of the model is 0.9512, which means that it correctly classified 95.12% of the cases. The sensitivity (also known as true positive rate) is 0.9398, indicating that the model correctly identified 93.98% of the malignant cases. The specificity (also known as true negative rate) is 0.9722, indicating that the model correctly identified 97.22% of the benign cases. The positive predictive value (also known as precision) is 0.9843, indicating that when the model predicted a case as malignant, it was correct 98.43% of the time. The negative predictive value is 0.8974, indicating that when the model predicted a case as benign, it was correct 89.74% of the time.
+
+
+
+
+## XGBOOST Model
+
+
+```{r}
+
+# Convert the class labels to 0 and 1 for binary classification
+train$Class <- ifelse(train$Class == "benign", 0, 1)
+test$Class <- ifelse(test$Class == "benign", 0, 1)
+
+# Convert entire train and test datasets to numeric
+train <- as.data.frame(lapply(train, as.numeric))
+test <- as.data.frame(lapply(test, as.numeric))
+
+# Convert the training and test data to DMatrix format
+dtrain <- xgb.DMatrix(data = as.matrix(train[, -which(names(train) == "Class")]), label = train$Class)
+dtest <- xgb.DMatrix(data = as.matrix(test[, -which(names(test) == "Class")]), label = test$Class)
+
+# Define XGBoost parameters
+params <- list(
+  # Binary classification problem
+  objective = "binary:logistic", 
+  
+  # Evaluation metric (logarithmic loss)
+  eval_metric = "logloss", 
+  
+  # Learning rate
+  eta = 0.3, 
+  
+  # Maximum depth of trees
+  max_depth = 6,   
+  
+  # Minimum sum of instance weight needed in a child
+  min_child_weight = 1,  
+  
+  # Subsample ratio of the training data
+  subsample = 1,  
+  
+  # Subsample ratio of columns when constructing each tree
+  colsample_bytree = 1              
+)
+
+set.seed(2023)
+# Train the XGBoost model
+xgb_model <- xgboost(data = dtrain, params = params, nrounds = 100, verbose = 1)
+
+# Make predictions on the test data
+xgb_predictions <- predict(xgb_model, dtest)
+
+# Convert predictions to class labels (0 or 1)
+xgb_predictions <- ifelse(xgb_predictions > 0.5, 1, 0)
+
+# Calculate accuracy
+accuracy <- sum(xgb_predictions == test$Class) / nrow(test)
+print(paste("Accuracy:", accuracy))
+
+```
+
+
+### Evaluation of the XGBOOST Metrics
+
+
+```{r}
+
+# Convert predictions and true labels to factors with levels "benign" and "malignant"
+predicted_labels <- factor(ifelse(xgb_predictions == 0, "benign", "malignant"), levels = c("benign", "malignant"))
+test$Class <- factor(ifelse(test$Class == 0, "benign", "malignant"), levels = c("benign", "malignant"))
+
+# Create confusion matrix
+confusion_matrix <- confusionMatrix(predicted_labels, test$Class)
+
+# Output the results
+# Output the results
+table(predicted_labels, test$Class)
+prop.table(table(predicted_labels, test$Class),1)
+cat('\n')
+cat('\n')
+
+
+# Confusion Matrix
+cf <- caret::confusionMatrix(data=predicted_labels,
+                     reference=test$Class)
+print(cf)
+
+```
+
+
+The XGBoost model was evaluated using a confusion matrix. The model predicted 132 cases as benign and they were actually benign, while 5 cases were predicted as benign but were actually malignant. On the other hand, the model predicted 67 cases as malignant and they were actually malignant, while 1 case was predicted as malignant but was actually benign.
+
+The accuracy of the model is 0.9707, which means that it correctly classified 97.07% of the cases. The sensitivity (also known as true positive rate) is 0.9925, indicating that the model correctly identified 99.25% of the malignant cases. The specificity (also known as true negative rate) is 0.9306, indicating that the model correctly identified 93.06% of the benign cases. The positive predictive value (also known as precision) is 0.9635, indicating that when the model predicted a case as malignant, it was correct 96.35% of the time. The negative predictive value is 0.9853, indicating that when the model predicted a case as benign, it was correct 98.53% of the time.
+
+
+
+
+## Comparison of Decision Tree, SVM, and XGBoost.
+
+Decision Tree:
+* Accuracy: 0.961
+* Sensitivity: 0.9699
+* Specificity: 0.9444
+
+SVM:
+* Accuracy: 0.9512
+* Sensitivity: 0.9398
+* Specificity: 0.9722
+
+XGBoost:
+* Accuracy: 0.9707
+* Sensitivity: 0.9925
+* Specificity: 0.9306
+
+Based on these metrics, the XGBoost model performed the best among the three models. It achieved the highest accuracy (0.9707) and sensitivity (0.9925), indicating that it correctly classified the majority of cases and had a low rate of false negatives. However, it had a slightly lower specificity (0.9306) compared to the SVM model. Overall, the XGBoost model demonstrated a good balance between accuracy and sensitivity, making it the best-performing model in this comparison.
+
